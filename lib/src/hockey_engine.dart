@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:studio_core/core/arcade.dart';
+import 'package:studio_core/core/arcade_duel.dart';
 import 'package:studio_core/core/level_plan.dart';
 import 'package:studio_core/core/rng.dart';
 
@@ -24,7 +25,7 @@ const double _friction = 0.996, _vMax = 36, _restitution = 0.92;
 /// Finger offset: the mallet sits a little above the finger so it stays visible.
 const double kFingerOffset = 70;
 
-class HockeySim extends ArcadeSim {
+class HockeySim extends ArcadeSim implements DuelSim {
   final HockeyLevel level;
   // puck
   double bx = 500, by = kMid + 170, vx = 0, vy = 0;
@@ -38,6 +39,10 @@ class HockeySim extends ArcadeSim {
   int lastEvent = 0; // 1 hit, 2 goal for, 3 goal against, 4 rail
   String flash = '';
   int flashTicks = 0;
+
+  /// Çevrimiçi düello: üst tokmağı karşıdaki oyuncu sürer (null: yapay zekâ).
+  ArcadeInput? _rival;
+  bool duel = false;
 
   HockeySim(this.level) : super(level.meta, lives: 3) {
     _setupMatch();
@@ -81,7 +86,12 @@ class HockeySim extends ArcadeSim {
     if (flashTicks > 0) flashTicks--;
     if (guard > 0) guard--;
     _movePlayer(input);
-    _moveCpu();
+    final rival = _rival;
+    if (rival != null) {
+      _moveRival(rival);
+    } else {
+      _moveCpu();
+    }
     if (pause > 0) {
       pause--;
       return;
@@ -104,6 +114,25 @@ class HockeySim extends ArcadeSim {
     mvy = ny - my;
     mx = nx;
     my = ny;
+  }
+
+  /// Karşıdaki oyuncunun tokmağı: oyuncununkiyle aynı kurallar, masa ters.
+  void _moveRival(ArcadeInput raw) {
+    final i = mirrorInput(raw);
+    var tx = cx, ty = cy;
+    if (i.down && i.hasPointer) {
+      tx = i.x;
+      ty = i.y + kFingerOffset;
+    }
+    if (i.dirX != 0) tx = cx + i.dirX * 40;
+    if (i.dirY != 0) ty = cy + i.dirY * 40;
+    tx = clampD(tx, kL + kMalletR, kR - kMalletR);
+    ty = clampD(ty, kT + kMalletR, kMid - kMalletR);
+    final nx = moveToward(cx, tx, 42), ny = moveToward(cy, ty, 42);
+    cvx = nx - cx;
+    cvy = ny - cy;
+    cx = nx;
+    cy = ny;
   }
 
   void _moveCpu() {
@@ -150,6 +179,98 @@ class HockeySim extends ArcadeSim {
     cvy = ny - cy;
     cx = nx;
     cy = ny;
+  }
+
+  // ---- DuelSim ----
+
+  @override
+  set rivalInput(ArcadeInput? input) => _rival = input;
+
+  @override
+  void enableDuel() {
+    duel = true;
+    lives = 1;
+  }
+
+  @override
+  int get duelWinner => won ? 0 : (dead ? 1 : -1);
+
+  @override
+  List<double> netState() => [
+        ticks.toDouble(), bx, by, vx, vy, mx, my, mvx, mvy, cx, cy, cvx, cvy, //
+        pause.toDouble(), idle.toDouble(), cool.toDouble(), guard.toDouble(),
+        myGoals.toDouble(), cpuGoals.toDouble(), toWin.toDouble(),
+        flashCode(flash, _flashes).toDouble(), flashTicks.toDouble(), lastEvent.toDouble(), score.toDouble(),
+        won ? 1.0 : 0.0, dead ? 1.0 : 0.0,
+      ];
+
+  @override
+  void applyNetState(List<double> s) {
+    if (s.length < 26) return;
+    int n(int i) => s[i].round();
+    ticks = n(0);
+    bx = s[1];
+    by = s[2];
+    vx = s[3];
+    vy = s[4];
+    mx = s[5];
+    my = s[6];
+    mvx = s[7];
+    mvy = s[8];
+    cx = s[9];
+    cy = s[10];
+    cvx = s[11];
+    cvy = s[12];
+    pause = n(13);
+    idle = n(14);
+    cool = n(15);
+    guard = n(16);
+    myGoals = n(17);
+    cpuGoals = n(18);
+    toWin = n(19);
+    flash = _flashes[n(20).clamp(0, _flashes.length - 1)];
+    flashTicks = n(21);
+    lastEvent = n(22);
+    score = n(23);
+    if (s[24] > 0.5 && !won) win();
+    if (s[25] > 0.5 && !dead) {
+      lives = 1;
+      shield = 0;
+      hit();
+    }
+  }
+
+  @override
+  List<double> lerpNet(List<double> a, List<double> b, double f) => lerpAt(a, b, f, const [1, 2, 5, 6, 9, 10]);
+
+  @override
+  void mirrorView() {
+    bx = kWorldW - bx;
+    by = kWorldH - by;
+    vx = -vx;
+    vy = -vy;
+    final ox = mx, oy = my, ovx = mvx, ovy = mvy;
+    mx = kWorldW - cx;
+    my = kWorldH - cy;
+    mvx = -cvx;
+    mvy = -cvy;
+    cx = kWorldW - ox;
+    cy = kWorldH - oy;
+    cvx = -ovx;
+    cvy = -ovy;
+    final g = myGoals;
+    myGoals = cpuGoals;
+    cpuGoals = g;
+    if (lastEvent == 2) {
+      lastEvent = 3;
+    } else if (lastEvent == 3) {
+      lastEvent = 2;
+    }
+    if (flash == 'GOAL!') {
+      flash = 'GOAL ×';
+    } else if (flash == 'GOAL ×') {
+      flash = 'GOAL!';
+    }
   }
 
   static double _dist(double ax, double ay, double bx, double by) {
@@ -318,6 +439,10 @@ class HockeySim extends ArcadeSim {
     return math.min(lifeStars(this, 3), q);
   }
 }
+
+// ---- Çevrimiçi düello ----
+
+const _flashes = ['', 'GOAL!', 'GOAL ×'];
 
 /// Autopilot: defends from its own half and shoots for the far corner of the
 /// goal, away from the rival's mallet.

@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:studio_core/app/arcade_duel_stage.dart';
 import 'package:studio_core/app/arcade_stage.dart';
 import 'package:studio_core/app/game_api.dart';
 import 'package:studio_core/core/game_rules.dart';
@@ -127,7 +128,15 @@ final havaHokeyiConfig = GameConfig(
   seedColor: const Color(0xFF0077B6),
   icon: Icons.sports_hockey_rounded,
   rules: AirHockeyRules(),
-  buildPlay: (ctx) => ArcadeStage(
+  buildPlay: (ctx) => ctx.match != null
+      ? ArcadeDuelStage(
+          ctx: ctx,
+          create: () => HockeySim((ctx.generated as GeneratedLevel<HockeyLevel>).puzzle),
+          paint: paintHockey,
+          bot: hockeyBot,
+          sound: hockeySound,
+        )
+      : ArcadeStage(
     ctx: ctx,
     create: () => HockeySim((ctx.generated as GeneratedLevel<HockeyLevel>).puzzle),
     paint: paintHockey,
