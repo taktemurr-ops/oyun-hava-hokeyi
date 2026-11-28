@@ -20,6 +20,9 @@ HockeyLevel generateHockey(LevelSpec spec) =>
 
 const double kL = 120, kR = 880, kT = 160, kB = 1440, kMid = 800;
 const double kGoalHalf = 170, kPuckR = 30, kMalletR = 56;
+
+/// Diskin bir yarıda en çok kalabileceği süre: 7 sn (60 tik/sn).
+const int kHoldTicks = 7 * 60;
 const double _friction = 0.996, _vMax = 36, _restitution = 0.92;
 
 /// Finger offset: the mallet sits a little above the finger so it stays visible.
@@ -33,6 +36,9 @@ class HockeySim extends ArcadeSim implements DuelSim {
   double mx = 500, my = kB - 150, mvx = 0, mvy = 0;
   double cx = 500, cy = kT + 130, cvx = 0, cvy = 0;
   int pause = 0, idle = 0, cool = 0, guard = 0;
+
+  /// Diskin aynı yarıda kaldığı süre (tik) ve o yarı: 7 sn kuralı.
+  int hold = 0, holdSide = -1;
   // match
   int myGoals = 0, cpuGoals = 0, toWin = 3;
   int goalsScored = 0, goalsConceded = 0, matchesWon = 0, saves = 0, bestStreak = 0, streak = 0;
@@ -71,6 +77,8 @@ class HockeySim extends ArcadeSim implements DuelSim {
     pause = 40;
     idle = 0;
     cool = 0;
+    hold = 0;
+    holdSide = side;
   }
 
   double _rnd(int k) => SeededRandom(mixSeed([meta.seed, ticks, k, 61])).nextDouble();
@@ -353,9 +361,18 @@ class HockeySim extends ArcadeSim implements DuelSim {
     // a puck left standing still is handed to the other side
     if (math.sqrt(vx * vx + vy * vy) < 0.4) {
       idle++;
-      if (idle > 150) _faceOff(by > kMid ? 1 : 0);
+      if (idle > 150) return _faceOff(by > kMid ? 1 : 0);
     } else {
       idle = 0;
+    }
+    // 7 sn kuralı (USAA hava hokeyi kuralları): disk bir yarıda 7 sn'den uzun
+    // kalırsa (tokmakla banda sıkıştırıp tutma dahil) karşı tarafa verilir.
+    final half = by > kMid ? 0 : 1;
+    if (half != holdSide) {
+      holdSide = half;
+      hold = 0;
+    } else if (++hold > kHoldTicks) {
+      _faceOff(1 - half);
     }
   }
 
